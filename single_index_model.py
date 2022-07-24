@@ -4,6 +4,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn import decomposition
 
+from utils import plot_results
+
 
 def cosine_basis(u, d):
     # u has shape (sample_size, n)
@@ -103,36 +105,17 @@ def generate_data(n, p, d, noise_theta, noise_a, plot=True, return_true=False):
         plt.plot(grid, np.squeeze(f, axis=0), label=r"$m(u)=\Psi(u)^\top a^*$")
         plt.scatter(np.squeeze(theta_X, axis=0), z, c='k', label=r"$X^\top \theta^*$")
         plt.legend()
-        plt.savefig("plots/target.png", bbox_inches='tight')
+        plt.savefig(f"plots/target_{n}_{p}_{d}.png", bbox_inches='tight')
 
     np.random.seed(3)
     theta0 = true_theta + noise_theta * np.random.randn(p)
     theta0 /= np.linalg.norm(theta0)
+    print(f"Distance from solution: {np.linalg.norm(theta0 - true_theta):.3f}")
 
     np.random.seed(4)
     a0 = np.zeros_like(true_a)  # true_a + noise_a * np.random.randn(d)
 
     return (X, z, theta0, a0, true_theta) if return_true else (X, z, theta0, a0)
-
-
-def plot_results(params_x, params_y, params_inner, results):
-    n_rows, n_cols = len(params_y), len(params_x)
-    fig, axs = plt.subplots(n_rows, n_cols, figsize=(16, 12))
-
-    for j, par_x in enumerate(params_x):
-        for i, par_y in enumerate(params_y):
-            ax = axs[i, j]
-            for par_in in params_inner:
-                obj_values = results.pop(0)
-                ax.plot(obj_values, label=r'$\rho_0=$' + f'{par_in}')
-                ax.set_title(r'$\rho=$' + f'{par_x}; {par_y} samples')
-            ax.legend()
-            ax.set_yscale('log')
-
-    for ax in axs.flat:
-        ax.set(xlabel='iterations', ylabel=r'objective $l(x)$')
-    plt.tight_layout()
-    plt.savefig(f"plots/exper.png", bbox_inches='tight')
 
 
 if __name__ == '__main__':
@@ -142,15 +125,16 @@ if __name__ == '__main__':
     noise_theta = 0.1
     noise_a = 0.1
 
-    X, z, theta0, a0 = generate_data(n, p, d, noise_theta, noise_a, plot=False)
+    X, z, theta0, a0, true_theta = generate_data(n, p, d, noise_theta, noise_a, plot=False, return_true=True)
 
-    n_steps = 100
-    rhos_0 = [0.1, 0.5, 1.]
-    rhos = [0.7, 0.9, 0.95]
-    sample_sizes = [100, 400, 1000]
+    n_steps = 30
+    rhos_0 = [0.004, 0.01, 0.04]
+    rhos = [0.65, 0.8]
+    sample_sizes = [200, 1000]
     I_d = np.eye(d)
 
-    results = []
+    obj_values = []
+    errors = []
     for rho in rhos:
         for sample_size in sample_sizes:
             for rho_0 in rhos_0:
@@ -159,6 +143,9 @@ if __name__ == '__main__':
 
                 traj = algorithm(n_steps, theta0, a0, X, z, rhos_theta, rhos_a, sample_size)
                 obj_vals = [objective(X, theta[None, :], d, 0, a, z, I_d)[0] for theta, a in traj]
-                results.append(obj_vals)
+                errs = [np.linalg.norm(theta - true_theta) for theta, _ in traj]
+                obj_values.append(obj_vals)
+                errors.append(errs)
 
-    plot_results(rhos, sample_sizes, rhos_0, results)
+    plot_results(rhos, sample_sizes, rhos_0, obj_values)
+    plot_results(rhos, sample_sizes, rhos_0, errors, is_objective=False)

@@ -47,9 +47,10 @@ def visualize_2d():
     theta0[0] = 0.25
     theta0[1] = np.sqrt(1 - theta0[0]**2)
 
-    create_base_figure(X, d, z, I_d, true_theta, rho_0, rho, sample_size)
+    obj_func = lambda theta: objective(X, theta, d, 0, None, z, I_d)[0]
+    create_base_figure(obj_func, true_theta, rho_0, rho, sample_size)  # X, d, z, I_d,
 
-    target  = lambda mean: objective(X, mean[None, :], d, 0, None, z, I_d)[0][0]
+    target = lambda mean: objective(X, mean[None, :], d, 0, None, z, I_d)[0][0]
     aux_func = lambda m_, s_, w_, k_: drawer(m_, s_, w_, k_, true_theta, target)
     algorithm(n_steps, theta0, a0, X, z, rhos, rhos, sample_size, aux_func=aux_func)
 

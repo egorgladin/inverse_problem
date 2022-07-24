@@ -1,10 +1,37 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.ticker import FormatStrFormatter
 import pickle
 import imageio.v2 as imageio
 
-from single_index_model import objective
+
+def plot_results(params_x, params_y, params_inner, results, is_objective=True):
+    n_rows, n_cols = len(params_y), len(params_x)
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True)
+
+    for j, par_x in enumerate(params_x):
+        for i, par_y in enumerate(params_y):
+            ax = axs[i, j] if (len(params_x) > 1 and len(params_y) > 1) else axs[i + j]
+            for par_in in params_inner:
+                obj_values = results.pop(0)
+                ax.plot(obj_values, label=r'$\rho_0=$' + f'{par_in}')
+                ax.set_title(r'$\rho=$' + f'{par_x}; {par_y} samples')
+
+            ax.legend()
+            ax.set_yscale('log')
+            ax.tick_params(axis='y', which='minor')
+            ax.grid(True, which="both")
+            # ax.yaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
+
+    for ax in axs.flat:
+        ylabel = r'objective $\ell(x)$' if is_objective else r'$||\theta_k-\theta^*||$'
+        ax.set(xlabel='iterations', ylabel=ylabel)
+
+
+    plt.tight_layout()
+    file_name = f"plots/" + ("obj" if is_objective else "err") + "_exper.png"
+    plt.savefig(file_name, bbox_inches='tight')
 
 
 def drawer(mean, sample, weights, k, theta_true, target_func):
@@ -39,7 +66,7 @@ def math_axes(ax, bounds):
     ax.set_ylim(*bounds)
 
 
-def grid_with_obj_values(bounds, X, d, z, I_d):
+def grid_with_obj_values(bounds, objective):  # X, d, z, I_d):
     grid_size = 100
     x = np.linspace(*bounds, grid_size)
     y = np.linspace(*bounds, grid_size)
@@ -49,12 +76,13 @@ def grid_with_obj_values(bounds, X, d, z, I_d):
     vals = np.empty((grid_size, grid_size))
     for i in range(grid_size):
         theta = thetas[i, :, :]
-        vals[i] = objective(X, theta, d, 0, None, z, I_d)[0]
+        vals[i] = objective(theta)
+        # vals[i] = objective(X, theta, d, 0, None, z, I_d)[0]
 
     return vals
 
 
-def create_base_figure(X, d, z, I_d, true_theta, rho_0, rho, sample_size):
+def create_base_figure(objective, true_theta, rho_0, rho, sample_size):  # X, d, z, I_d
     # Initialize figure
     fig_base, axes_base = plt.subplots(1, 3, gridspec_kw={'width_ratios': [5, 1, 1]}, figsize=(10, 8))
     ax_base = axes_base[0]
@@ -62,7 +90,7 @@ def create_base_figure(X, d, z, I_d, true_theta, rho_0, rho, sample_size):
     math_axes(ax_base, bounds)
 
     # Create levels
-    vals = grid_with_obj_values(bounds, X, d, z, I_d)
+    vals = grid_with_obj_values(bounds, objective)  # X, d, z, I_d)
 
     pos = ax_base.imshow(vals, interpolation='bilinear', origin='lower',
                     cmap=cm.inferno, alpha=0.6, extent=(*bounds, *bounds))
@@ -87,6 +115,7 @@ def create_base_figure(X, d, z, I_d, true_theta, rho_0, rho, sample_size):
     with open('ax_base.pkl', 'wb') as fs:
         pickle.dump(axes_base, fs)
     plt.close(fig_base)
+
 
 def build_gif(noise_theta, n_steps):
     # build gif
