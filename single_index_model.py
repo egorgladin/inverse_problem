@@ -3,6 +3,9 @@ import scipy
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn import decomposition
+import pickle
+from sliced import SlicedInverseRegression, SlicedAverageVarianceEstimation
+import rpy2
 
 from utils import plot_results
 
@@ -42,13 +45,13 @@ def objective(X, thetas, d, rho_a, a, z, I_d):
     # thetas @ X has shape (sample_size, n)
     Psi = cosine_basis(thetas @ X, d)  # shape (sample_size, d, n)
     a_tilde = get_a_tilde(Psi, I_d / rho_a, z, a, rho_a) if rho_a > 0\
-        else get_a_tilde(Psi, np.zeros((d, d)), z, a, 0)  # shape (sample_size, d)
+        else get_a_tilde(Psi, np.zeros((d, d)), z, None, 0)  # shape (sample_size, d)
     estimate = get_estimate(Psi, a_tilde)  # shape (sample_size, n)
     ls = 0.5 * ((estimate - z) ** 2).sum(axis=1)  # shape (sample_size,)
     return ls, a_tilde
 
 
-def algorithm(n_steps, theta, a, X, z, rhos_theta, rhos_a, sample_size, aux_func=None):
+def algorithm(n_steps, theta, a, X, z, rhos_theta, rhos_a, sample_size, seed=0, aux_func=None):
     # X has shape (p, n)
     p = len(theta)
     d = len(a)
@@ -56,9 +59,9 @@ def algorithm(n_steps, theta, a, X, z, rhos_theta, rhos_a, sample_size, aux_func
     pca = decomposition.PCA(n_components=1)
 
     traj = [(theta, a)]
-    for k in tqdm(range(n_steps)):
+    for k in range(n_steps):  # tqdm(range(n_steps)):
         rho_theta, rho_a = rhos_theta[k], rhos_a[k]
-        np.random.seed(100 + k)
+        np.random.seed(seed + k)
         thetas = np.random.normal(loc=theta, scale=np.sqrt(rho_theta), size=(sample_size, p))
 
         ls, a_tilde = objective(X, thetas, d, rho_a, a, z, I_d)
@@ -80,7 +83,7 @@ def algorithm(n_steps, theta, a, X, z, rhos_theta, rhos_a, sample_size, aux_func
     return traj
 
 
-def generate_data(n, p, d, noise_theta, noise_a, plot=True, return_true=False):
+def generate_data(n, p, d, noise_theta, noise_a, noise_m=0., plot=True, return_true=False):
     np.random.seed(0)
     X = np.random.randn(p, n)
 
@@ -94,7 +97,8 @@ def generate_data(n, p, d, noise_theta, noise_a, plot=True, return_true=False):
     np.random.seed(2)
     true_a = np.random.randn(d)
     z = get_estimate(Psi, true_a[None, :])  # shape (1, n)
-    z = np.squeeze(z, axis=0)
+    np.random.seed(5)
+    z = np.squeeze(z, axis=0) + noise_m * np.random.randn(n)
 
     if plot:
         grid = np.linspace(theta_X.min() - 0.1, theta_X.max() + 0.1, num=500)
@@ -105,7 +109,7 @@ def generate_data(n, p, d, noise_theta, noise_a, plot=True, return_true=False):
         plt.plot(grid, np.squeeze(f, axis=0), label=r"$m(u)=\Psi(u)^\top a^*$")
         plt.scatter(np.squeeze(theta_X, axis=0), z, c='k', label=r"$X^\top \theta^*$")
         plt.legend()
-        plt.savefig(f"plots/target_{n}_{p}_{d}.png", bbox_inches='tight')
+        plt.savefig(f"plots/target_{n}_{p}_{d}{f'_noise_{noise_m}' if noise_m != 0 else ''}.png", bbox_inches='tight')
 
     np.random.seed(3)
     theta0 = true_theta + noise_theta * np.random.randn(p)
@@ -118,34 +122,109 @@ def generate_data(n, p, d, noise_theta, noise_a, plot=True, return_true=False):
     return (X, z, theta0, a0, true_theta) if return_true else (X, z, theta0, a0)
 
 
-if __name__ == '__main__':
+def grid_search():
     n = 200
     p = 10
     d = 10
-    noise_theta = 0.1
+    noise_theta = 2.
     noise_a = 0.1
 
     X, z, theta0, a0, true_theta = generate_data(n, p, d, noise_theta, noise_a, plot=False, return_true=True)
 
     n_steps = 30
-    rhos_0 = [0.004, 0.01, 0.04]
-    rhos = [0.65, 0.8]
-    sample_sizes = [200, 1000]
+    rhos_0 = [0.5, 1]  # [0.01, 0.04, 0.1]  # 0.004,
+    rhos = [0.6, 0.8]  # [0.6, 0.7, 0.8, 0.9]
+    sample_sizes = [1600]  # [200, 400, 800, 1600]
     I_d = np.eye(d)
 
-    obj_values = []
-    errors = []
-    for rho in rhos:
-        for sample_size in sample_sizes:
-            for rho_0 in rhos_0:
-                rhos_theta = [rho_0 * (rho ** i) for i in range(n_steps)]
-                rhos_a = [rho_0 * (rho ** i) for i in range(n_steps)]
+    RUN_ALG = True
+    if RUN_ALG:
+        n_takes = 50
+        obj_values = []
+        errors = []
+        counter = 0
+        total = len(rhos_0) * len(rhos) * len(sample_sizes) * n_takes
+        for rho in rhos:
+            for sample_size in sample_sizes:
+                for rho_0 in rhos_0:
+                    rhos_theta = [rho_0 * (rho ** i) for i in range(n_steps)]
+                    rhos_a = [rho_0 * (rho ** i) for i in range(n_steps)]
 
-                traj = algorithm(n_steps, theta0, a0, X, z, rhos_theta, rhos_a, sample_size)
-                obj_vals = [objective(X, theta[None, :], d, 0, a, z, I_d)[0] for theta, a in traj]
-                errs = [np.linalg.norm(theta - true_theta) for theta, _ in traj]
-                obj_values.append(obj_vals)
-                errors.append(errs)
+                    obj_vals_takes = []
+                    errs_takes = []
+                    for take in tqdm(range(n_takes)):
+                        traj = algorithm(n_steps, theta0, a0, X, z, rhos_theta, rhos_a, sample_size, seed=take*n_steps)
+                        obj_vals = [objective(X, theta[None, :], d, 0, a, z, I_d)[0].item() for theta, a in traj]
+                        errs = [np.linalg.norm(theta - true_theta) for theta, _ in traj]
+                        obj_vals_takes.append(obj_vals)
+                        errs_takes.append(errs)
 
-    plot_results(rhos, sample_sizes, rhos_0, obj_values)
-    plot_results(rhos, sample_sizes, rhos_0, errors, is_objective=False)
+                        counter += 1
+                        if counter % 400 == 0:
+                            print(f"\nFinished {counter}/{total} runs")
+
+                    # obj_vals_avg = np.row_stack(obj_vals_takes).mean(axis=0)
+                    # errs_avg = np.row_stack(errs_takes).mean(axis=0)
+                    # obj_values.append(obj_vals_avg)
+                    # errors.append(errs_avg
+                    obj_values.append(obj_vals_takes)
+                    errors.append(errs_takes)
+
+        with open('results3.pickle', 'wb') as handle:
+            pickle.dump((obj_values, errors), handle)
+
+    else:
+        with open('results3.pickle', 'rb') as handle:
+            tup = pickle.load(handle)
+            obj_values, errors = tup
+
+    plot_results(rhos, sample_sizes, rhos_0, obj_values, plot_many=True, suffix='3')
+    plot_results(rhos, sample_sizes, rhos_0, errors, is_objective=False, plot_many=True, suffix='3')
+
+
+if __name__ == '__main__':
+    n = 200
+    p = 10
+    d = 10
+    noise_theta = 0.1
+    noise_a = None
+    noise_m = 0.3
+
+    X, z, theta0, a0, true_theta = generate_data(n, p, d, noise_theta, noise_a, noise_m=noise_m, plot=False, return_true=True)
+
+    n_steps = 5  # fixme
+    rho_0 = 0.01
+    rho = 0.7
+    sample_size = 200
+    I_d = np.eye(d)
+    n_takes = 3  # fixme
+
+    rhos_theta = [rho_0 * (rho ** i) for i in range(n_steps)]
+    rhos_a = [rho_0 * (rho ** i) for i in range(n_steps)]
+
+    obj_vals_takes = []
+    errs_takes = []
+    for take in tqdm(range(n_takes)):
+        traj = algorithm(n_steps, theta0, a0, X, z, rhos_theta, rhos_a, sample_size, seed=take * n_steps)
+        obj_vals = [objective(X, theta[None, :], d, 0, a, z, I_d)[0].item() for theta, a in traj]
+        errs = [np.linalg.norm(theta - true_theta) for theta, _ in traj]
+        obj_vals_takes.append(obj_vals)
+        errs_takes.append(errs)
+
+    best_n_slices = None
+    best_obj_val = 1e9
+    for n_slices in range(10, 101, 10):
+        # sir = SlicedInverseRegression(n_directions=1, n_slices=n_slices)
+        sir = SlicedAverageVarianceEstimation(n_directions=1, n_slices=n_slices)
+        # X_sir = sir.fit_transform(X.T, z)  # shape (n, 1)
+        sir.fit(X.T, z)
+        theta_sir = sir.directions_  # [0, :]
+        sir_val = objective(X, theta_sir, d, 0, None, z, I_d)[0].item()
+        if sir_val < best_obj_val:
+            best_n_slices = n_slices
+            best_obj_val = sir_val
+        print(f"n_slices={n_slices}, sir_val={round(sir_val, 1)}")
+
+    plot_results([rho], [sample_size], [rho_0], [obj_vals_takes], plot_many=True, suffix='noise', hline=best_obj_val, hline_name='SIR')
+    plot_results([rho], [sample_size], [rho_0], [errs_takes], is_objective=False, plot_many=True, suffix='noise')
+

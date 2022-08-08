@@ -57,6 +57,50 @@ def visualize_2d():
     build_gif(noise_theta, n_steps)
 
 
+def test_r():
+    import os
+    os.environ["R_HOME"] = r"D:\Software\R-4.2.1"
+    import rpy2.robjects as robjects
+    import rpy2.robjects.packages as rpackages
+    # from rpy2.robjects.vectors import StrVector
+
+    # utils_ = rpackages.importr('utils')
+    # utils_.chooseCRANmirror(ind=1)
+    #
+    # packageNames = ('MAVE',)
+    # packnames_to_install = [x for x in packageNames if not rpackages.isinstalled(x)]
+    #
+    # # Running R in Python example installing packages:
+    # if len(packnames_to_install) > 0:
+    #     utils_.install_packages(StrVector(packnames_to_install))
+
+    mave = rpackages.importr('MAVE')
+
+    import rpy2.robjects.numpy2ri
+    rpy2.robjects.numpy2ri.activate()
+
+    np.random.seed(0)
+    X = np.random.randn(100, 10)
+    theta = np.zeros(10)
+    theta[-2:] = 1
+    y = ((X @ theta)**2)[:, None]
+
+    nr, nc = X.shape
+    Xr = robjects.r.matrix(X, nrow=nr, ncol=nc)
+    robjects.r.assign("X", Xr)
+
+    nr, nc = y.shape
+    yr = robjects.r.matrix(y, nrow=nr, ncol=nc)
+    robjects.r.assign("y", yr)
+
+    res = robjects.r("""
+        dr.mave <- mave(y~X, max.dim = 1)
+        dir <- coef(dr.mave, dim = 1)
+        dir
+        """)  # , method = 'MEANOPG'
+    print(res)
+
+
 if __name__ == '__main__':
     # M = 10
     # n = 12
@@ -64,4 +108,6 @@ if __name__ == '__main__':
     #
     # test_einsum(M, d, n)
     # test_cosine_basis(M, d, n)
-    visualize_2d()
+    # visualize_2d()
+
+    test_r()

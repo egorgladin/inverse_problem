@@ -6,16 +6,33 @@ import pickle
 import imageio.v2 as imageio
 
 
-def plot_results(params_x, params_y, params_inner, results, is_objective=True):
+def plot_results(params_x, params_y, params_inner, results, is_objective=True, plot_many=False,
+                 alpha=0.3, suffix='', hline=None, hline_name=None):
     n_rows, n_cols = len(params_y), len(params_x)
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True)
 
+    basic_colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'w']
+    basic_colors = basic_colors[:len(params_inner)]
+
+    names = []
+    dims = int(len(params_x) > 1) + int(len(params_y) > 1)
     for j, par_x in enumerate(params_x):
         for i, par_y in enumerate(params_y):
-            ax = axs[i, j] if (len(params_x) > 1 and len(params_y) > 1) else axs[i + j]
-            for par_in in params_inner:
+            # ax = axs[i, j] if (len(params_x) > 1 and len(params_y) > 1) else axs[i + j]
+            ax = axs[i, j] if dims == 2 else (axs[i + j] if dims == 1 else axs)
+            for color, par_in in zip(basic_colors, params_inner):
                 obj_values = results.pop(0)
-                ax.plot(obj_values, label=r'$\rho_0=$' + f'{par_in}')
+                lbl = r'$\rho_0=$' + f'{par_in}'
+                if plot_many:
+                    for take, o_v in enumerate(obj_values):
+                        names.append(lbl)
+                        ax.plot(o_v, label=('_' + lbl) if take else lbl, alpha=alpha, c=color)
+                else:
+                    ax.plot(obj_values, label=lbl)
+
+                if hline is not None:
+                    n_iter = len(obj_values[0]) if plot_many else len(obj_values)
+                    ax.hlines(y=hline, xmin=0, xmax=n_iter, label=hline_name)  # , linewidth=2, color='r'
                 ax.set_title(r'$\rho=$' + f'{par_x}; {par_y} samples')
 
             ax.legend()
@@ -24,13 +41,13 @@ def plot_results(params_x, params_y, params_inner, results, is_objective=True):
             ax.grid(True, which="both")
             # ax.yaxis.set_minor_formatter(FormatStrFormatter("%.1f"))
 
-    for ax in axs.flat:
+    for ax in (axs.flat if dims > 1 else [axs]):
         ylabel = r'objective $\ell(x)$' if is_objective else r'$||\theta_k-\theta^*||$'
         ax.set(xlabel='iterations', ylabel=ylabel)
 
 
     plt.tight_layout()
-    file_name = f"plots/" + ("obj" if is_objective else "err") + "_exper.png"
+    file_name = f"plots/" + ("obj" if is_objective else "err") + "_exper" + suffix + ".png"
     plt.savefig(file_name, bbox_inches='tight')
 
 
